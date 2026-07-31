@@ -106,7 +106,7 @@ class ConvertInputToAppFunctionDataUseCase
                                 .build()
                         builder.setAppFunctionData(name, uriData)
                     } else {
-                        val objData = convertObject(dataType, value as Map<String, Any>, components)
+                        val objData = toAppFunctionData(dataType, value, components)
                         builder.setAppFunctionData(name, objData)
                     }
                 }
@@ -126,7 +126,7 @@ class ConvertInputToAppFunctionDataUseCase
                                     .build()
                             builder.setAppFunctionData(name, uriData)
                         } else {
-                            val objData = convertObject(objectType, value as Map<String, Any>, components)
+                            val objData = toAppFunctionData(objectType, value, components)
                             builder.setAppFunctionData(name, objData)
                         }
                     }
@@ -134,15 +134,24 @@ class ConvertInputToAppFunctionDataUseCase
             }
         }
 
-        private fun convertObject(
+        private fun toAppFunctionData(
             objectType: AppFunctionObjectTypeMetadata,
-            values: Map<String, Any>,
+            value: Any,
             components: AppFunctionComponentsMetadata,
         ): AppFunctionData {
+            val mapValue = if (value is String) {
+                val uriPropName = objectType.properties.entries.find { isUriMetadata(it.value) }?.key
+                    ?: objectType.properties.entries.find { it.value is AppFunctionStringTypeMetadata }?.key
+                    ?: throw IllegalArgumentException("Cannot convert string value to object $objectType: no Uri or String property found")
+                mapOf(uriPropName to value)
+            } else {
+                value as Map<String, Any>
+            }
+
             val builder = AppFunctionData.Builder(objectType, components)
             for ((propName, propType) in objectType.properties) {
-                val value = values[propName] ?: continue
-                setParameterValue(builder, propName, propType, value, components)
+                val propValue = mapValue[propName] ?: continue
+                setParameterValue(builder, propName, propType, propValue, components)
             }
             return builder.build()
         }
@@ -180,7 +189,9 @@ class ConvertInputToAppFunctionDataUseCase
                 }
                 is AppFunctionObjectTypeMetadata -> {
                     val dataList =
-                        values.map { convertObject(itemType, it as Map<String, Any>, components) }
+                        values.map { item ->
+                            toAppFunctionData(itemType, item, components)
+                        }
                     builder.setAppFunctionDataList(name, dataList)
                 }
                 is AppFunctionReferenceTypeMetadata -> {
@@ -189,10 +200,19 @@ class ConvertInputToAppFunctionDataUseCase
                         components.dataTypes[referenceKey] as? AppFunctionObjectTypeMetadata
                     if (objectType != null) {
                         val dataList =
-                            values.map { convertObject(objectType, it as Map<String, Any>, components) }
+                            values.map { item ->
+                                toAppFunctionData(objectType, item, components)
+                            }
                         builder.setAppFunctionDataList(name, dataList)
                     }
                 }
             }
+        }
+
+        private fun isUriMetadata(dataType: AppFunctionDataTypeMetadata?): Boolean {
+            if (dataType == null) return false
+            if (dataType is AppFunctionObjectTypeMetadata && dataType.qualifiedName == "android.net.Uri") return true
+            if (dataType is AppFunctionReferenceTypeMetadata && dataType.referenceDataType == "android.net.Uri") return true
+            return false
         }
     }
