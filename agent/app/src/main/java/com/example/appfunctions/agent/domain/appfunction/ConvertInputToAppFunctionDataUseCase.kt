@@ -139,14 +139,19 @@ class ConvertInputToAppFunctionDataUseCase
             value: Any,
             components: AppFunctionComponentsMetadata,
         ): AppFunctionData {
-            val mapValue = if (value is String) {
-                val uriPropName = objectType.properties.entries.find { isUriMetadata(it.value) }?.key
-                    ?: objectType.properties.entries.find { it.value is AppFunctionStringTypeMetadata }?.key
-                    ?: throw IllegalArgumentException("Cannot convert string value to object $objectType: no Uri or String property found")
-                mapOf(uriPropName to value)
-            } else {
-                value as Map<String, Any>
-            }
+            val mapValue =
+                if (value is String) {
+                    val uriPropName =
+                        objectType.properties.entries.find { isUriMetadata(it.value) }?.key
+                            ?: objectType.properties.entries.find { it.value is AppFunctionStringTypeMetadata }?.key
+                            ?: throw IllegalArgumentException(
+                                "Cannot convert string value to object $objectType: " +
+                                    "no Uri or String property found",
+                            )
+                    mapOf(uriPropName to value)
+                } else {
+                    value as Map<*, *>
+                }
 
             val builder = AppFunctionData.Builder(objectType, components)
             for ((propName, propType) in objectType.properties) {

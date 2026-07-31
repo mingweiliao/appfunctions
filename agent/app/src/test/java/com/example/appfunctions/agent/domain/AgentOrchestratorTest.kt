@@ -19,6 +19,7 @@ import android.content.Intent
 import androidx.appfunctions.AppFunctionData
 import androidx.appfunctions.metadata.AppFunctionMetadata
 import androidx.appfunctions.metadata.AppFunctionPackageMetadata
+import com.example.appfunctions.agent.data.AgentInternalTools
 import com.example.appfunctions.agent.data.LlmModel
 import com.example.appfunctions.agent.data.LlmProviderName
 import com.example.appfunctions.agent.data.ServiceTier
@@ -70,6 +71,7 @@ class AgentOrchestratorTest {
     private val convertInputToAppFunctionDataUseCase: ConvertInputToAppFunctionDataUseCase = mockk()
     private val context: android.content.Context = mockk(relaxed = true)
     private val savePendingIntentUseCase: SavePendingIntentUseCase = mockk(relaxed = true)
+    private val agentInternalTools: AgentInternalTools = mockk(relaxed = true)
 
     private lateinit var agentOrchestrator: AgentOrchestrator
 
@@ -89,6 +91,7 @@ class AgentOrchestratorTest {
                 convertInputToAppFunctionDataUseCase = convertInputToAppFunctionDataUseCase,
                 executeAppFunctionUseCase = executeAppFunctionUseCase,
                 savePendingIntentUseCase = savePendingIntentUseCase,
+                agentInternalTools = agentInternalTools,
             )
     }
 
