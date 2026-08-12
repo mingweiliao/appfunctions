@@ -98,17 +98,8 @@ class ConvertInputToAppFunctionDataUseCase
                     }
                 }
                 is AppFunctionObjectTypeMetadata -> {
-                    if (dataType.qualifiedName == "android.net.Uri" && value is String) {
-                        val uriPropertyName = dataType.properties.keys.firstOrNull() ?: "uri"
-                        val uriData =
-                            AppFunctionData.Builder(dataType, components)
-                                .setString(uriPropertyName, value)
-                                .build()
-                        builder.setAppFunctionData(name, uriData)
-                    } else {
-                        val objData = convertObject(dataType, value as Map<String, Any>, components)
-                        builder.setAppFunctionData(name, objData)
-                    }
+                    val objData = toAppFunctionData(dataType, value, components)
+                    builder.setAppFunctionData(name, objData)
                 }
                 is AppFunctionArrayTypeMetadata -> {
                     setArrayValue(builder, name, dataType, value as List<Any>, components)
@@ -118,20 +109,25 @@ class ConvertInputToAppFunctionDataUseCase
                     val objectType =
                         components.dataTypes[referenceKey] as? AppFunctionObjectTypeMetadata
                     if (objectType != null) {
-                        if (referenceKey == "android.net.Uri" && value is String) {
-                            val uriPropertyName = objectType.properties.keys.firstOrNull() ?: "uri"
-                            val uriData =
-                                AppFunctionData.Builder(objectType, components)
-                                    .setString(uriPropertyName, value)
-                                    .build()
-                            builder.setAppFunctionData(name, uriData)
-                        } else {
-                            val objData = convertObject(objectType, value as Map<String, Any>, components)
-                            builder.setAppFunctionData(name, objData)
-                        }
+                        val objData = toAppFunctionData(objectType, value, components)
+                        builder.setAppFunctionData(name, objData)
                     }
                 }
             }
+        }
+
+        private fun toAppFunctionData(
+            objectType: AppFunctionObjectTypeMetadata,
+            value: Any,
+            components: AppFunctionComponentsMetadata,
+        ): AppFunctionData {
+            if (objectType.qualifiedName == "android.net.Uri" && value is String) {
+                val uriPropertyName = objectType.properties.keys.firstOrNull() ?: "uri"
+                return AppFunctionData.Builder(objectType, components)
+                    .setString(uriPropertyName, value)
+                    .build()
+            }
+            return convertObject(objectType, value as Map<String, Any>, components)
         }
 
         private fun convertObject(
@@ -180,7 +176,9 @@ class ConvertInputToAppFunctionDataUseCase
                 }
                 is AppFunctionObjectTypeMetadata -> {
                     val dataList =
-                        values.map { convertObject(itemType, it as Map<String, Any>, components) }
+                        values.map { item ->
+                            toAppFunctionData(itemType, item, components)
+                        }
                     builder.setAppFunctionDataList(name, dataList)
                 }
                 is AppFunctionReferenceTypeMetadata -> {
@@ -189,7 +187,9 @@ class ConvertInputToAppFunctionDataUseCase
                         components.dataTypes[referenceKey] as? AppFunctionObjectTypeMetadata
                     if (objectType != null) {
                         val dataList =
-                            values.map { convertObject(objectType, it as Map<String, Any>, components) }
+                            values.map { item ->
+                                toAppFunctionData(objectType, item, components)
+                            }
                         builder.setAppFunctionDataList(name, dataList)
                     }
                 }

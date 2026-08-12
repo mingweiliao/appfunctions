@@ -27,6 +27,7 @@ import androidx.appfunctions.metadata.AppFunctionObjectTypeMetadata
 import androidx.appfunctions.metadata.AppFunctionParameterMetadata
 import androidx.appfunctions.metadata.AppFunctionReferenceTypeMetadata
 import androidx.core.content.FileProvider
+import com.example.appfunctions.agent.data.AgentInternalTools
 import com.example.appfunctions.agent.data.LlmProviderName
 import com.example.appfunctions.agent.data.SettingsRepository
 import com.example.appfunctions.agent.data.db.entities.MessageAttachment
@@ -84,6 +85,7 @@ class AgentOrchestrator
         private val convertInputToAppFunctionDataUseCase: ConvertInputToAppFunctionDataUseCase,
         private val executeAppFunctionUseCase: ExecuteAppFunctionUseCase,
         private val savePendingIntentUseCase: SavePendingIntentUseCase,
+        private val agentInternalTools: AgentInternalTools,
     ) {
         private val _status = MutableStateFlow<AgentStatus>(AgentStatus.Idle)
 
@@ -129,7 +131,9 @@ class AgentOrchestrator
                 }
 
                 val disconnectedApps = settingsRepository.disconnectedApps.first()
-                val allTools = getAppFunctionsUseCase().first().values.flatten()
+                val allTools =
+                    getAppFunctionsUseCase().first().values.flatten() +
+                        agentInternalTools.getInternalToolsMetadata()
 
                 val targetPackageName = message.targetPackageName
                 val queryText = message.textContent
@@ -362,6 +366,29 @@ class AgentOrchestrator
             val results = mutableListOf<ToolOutput>()
             for (toolCall in toolCalls) {
                 _status.value = AgentStatus.InvokingTool(toolCall.functionId, toolCall.packageName)
+
+                if (toolCall.packageName == AgentInternalTools.INTERNAL_TOOL_PACKAGE) {
+                    val executionResult = executeInternalTool(toolCall)
+                    executionResult
+                        .onSuccess { jsonString ->
+                            results.add(
+                                ToolOutput(
+                                    functionId = toolCall.functionId,
+                                    callId = toolCall.callId,
+                                    result = jsonString,
+                                ),
+                            )
+                        }
+                        .onFailure { exception ->
+                            completeMessageWithError(
+                                message.messageId,
+                                message.threadId,
+                                "Internal tool execution failed: ${exception.message}",
+                            )
+                            return ExecuteToolCallsResult.Error
+                        }
+                    continue
+                }
 
                 val matchingTool =
                     tools.find {
@@ -646,6 +673,51 @@ class AgentOrchestrator
             if (dataType is AppFunctionObjectTypeMetadata && dataType.qualifiedName == "android.net.Uri") return true
             if (dataType is AppFunctionReferenceTypeMetadata && dataType.referenceDataType == "android.net.Uri") return true
             return false
+        }
+
+        private suspend fun executeInternalTool(toolCall: LlmResponsePart.ToolCall): Result<String> {
+            return runCatching {
+                when (toolCall.functionId) {
+                    "getCurrentLocation" -> {
+                        val location = agentInternalTools.getCurrentLocation()
+                        if (location != null) {
+                            JSONObject().apply {
+                                put("latitude", location.latitude)
+                                put("longitude", location.longitude)
+                            }.toString()
+                        } else {
+                            "null"
+                        }
+                    }
+                    "geocodeAddress" -> {
+                        val address =
+                            toolCall.arguments["address"] as? String
+                                ?: throw IllegalArgumentException("Missing required parameter 'address'")
+                        val location = agentInternalTools.geocodeAddress(address)
+                        if (location != null) {
+                            JSONObject().apply {
+                                put("latitude", location.latitude)
+                                put("longitude", location.longitude)
+                            }.toString()
+                        } else {
+                            "null"
+                        }
+                    }
+                    "generateImage" -> {
+                        val prompt =
+                            toolCall.arguments["prompt"] as? String
+                                ?: throw IllegalArgumentException("Missing required parameter 'prompt'")
+                        val aspectRatio = toolCall.arguments["aspectRatio"] as? String
+                        val result = agentInternalTools.generateImage(prompt, aspectRatio)
+                        JSONObject().apply {
+                            put("imageUri", result.imageUri)
+                            put("mimeType", result.mimeType)
+                            put("prompt", result.prompt)
+                        }.toString()
+                    }
+                    else -> throw IllegalArgumentException("Unknown internal tool: ${toolCall.functionId}")
+                }
+            }
         }
 
         companion object {

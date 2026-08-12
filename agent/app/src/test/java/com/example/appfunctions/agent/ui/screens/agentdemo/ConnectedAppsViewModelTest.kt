@@ -15,6 +15,7 @@
  */
 package com.example.appfunctions.agent.ui.screens.agentdemo
 
+import androidx.lifecycle.ViewModel
 import com.example.appfunctions.agent.domain.appfunction.ConnectedAppInfo
 import com.example.appfunctions.agent.domain.appfunction.GetConnectedAppsUseCase
 import io.mockk.every
@@ -50,6 +51,9 @@ class ConnectedAppsViewModelTest {
 
     @After
     fun tearDown() {
+        if (::viewModel.isInitialized) {
+            viewModel.clearForTest()
+        }
         Dispatchers.resetMain()
     }
 
@@ -83,4 +87,10 @@ class ConnectedAppsViewModelTest {
             val disconnectedApps = fakeRepository.disconnectedApps.first()
             assertEquals(setOf("test.package"), disconnectedApps)
         }
+
+    private fun ViewModel.clearForTest() {
+        val method = ViewModel::class.java.getDeclaredMethod("onCleared")
+        method.isAccessible = true
+        method.invoke(this)
+    }
 }
