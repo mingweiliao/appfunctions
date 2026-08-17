@@ -26,7 +26,10 @@ plugins {
 android {
     namespace = "com.example.appfunctions.agent"
     compileSdk {
-        version = release(37)
+        version =
+            release(37) {
+                minorApiLevel = 1
+            }
     }
 
     defaultConfig {

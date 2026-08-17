@@ -16,25 +16,40 @@
 package com.example.appfunctions.agent.domain.appfunction
 
 import android.app.AppInteractionAttribution
+import android.app.AppInteractionManager
+import android.app.AppInteractionSession
 import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.os.CancellationSignal
 import androidx.appfunctions.AppFunctionData
 import androidx.appfunctions.AppFunctionManager
 import androidx.appfunctions.ExecuteAppFunctionRequest
 import androidx.appfunctions.ExecuteAppFunctionResponse
 import androidx.appfunctions.ExecuteAppFunctionResponse.Success.Companion.PROPERTY_RETURN_VALUE
+import androidx.appfunctions.ExecuteAppFunctionResponse.Success.Companion.toCompatExecuteAppFunctionResponse
 import androidx.appfunctions.metadata.AppFunctionMetadata
 import androidx.appfunctions.metadata.AppFunctionParcelableTypeMetadata
 import androidx.core.net.toUri
+import androidx.core.os.asOutcomeReceiver
+import dagger.hilt.android.qualifiers.ApplicationContext
+import io.ktor.util.collections.ConcurrentMap
+import kotlinx.coroutines.suspendCancellableCoroutine
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /** Use case to execute an AppFunction. */
+@Singleton
 class ExecuteAppFunctionUseCase
     @Inject
     constructor(
+        @ApplicationContext private val context: Context,
         private val appFunctionManager: AppFunctionManager?,
         private val convertAppFunctionDataToJsonUseCase: ConvertAppFunctionDataToJsonUseCase,
     ) {
+        private val availableSession = ConcurrentMap<String, AppInteractionSession>()
+
         /**
          * Executes the use case.
          *
@@ -80,8 +95,32 @@ class ExecuteAppFunctionUseCase
                     )
                 }
 
+            val response =
+                if (hasAppInteractionManager()) {
+                    val platformRequest = request.toPlatformExecuteAppFunctionRequest()
+                    val session = getSession(threadId, request.targetPackageName)
+                    val platformResponse =
+                        suspendCancellableCoroutine { continuation ->
+                            context.getSystemService(android.app.appfunctions.AppFunctionManager::class.java)
+                                .executeAppFunction(
+                                    session,
+                                    platformRequest,
+                                    Runnable::run,
+                                    CancellationSignal(),
+                                    continuation.asOutcomeReceiver(),
+                                )
+                        }
+                    platformResponse.toCompatExecuteAppFunctionResponse(function).also {
+                        if (threadId == null) {
+                            session.close()
+                        }
+                    }
+                } else {
+                    appFunctionManager.executeAppFunction(request)
+                }
+
             return try {
-                when (val response = appFunctionManager.executeAppFunction(request)) {
+                when (response) {
                     is ExecuteAppFunctionResponse.Success -> {
                         val data = response.returnValue
                         val valueType = function.response.valueType
@@ -115,6 +154,45 @@ class ExecuteAppFunctionUseCase
             } catch (e: Exception) {
                 ExecuteAppFunctionResult.Error(e)
             }
+        }
+
+        private suspend fun getSession(
+            threadId: String?,
+            targetPackage: String,
+        ): AppInteractionSession {
+            check(hasAppInteractionManager())
+            if (threadId != null && availableSession.contains(threadId)) {
+                return checkNotNull(availableSession[threadId])
+            }
+            val appInteractionManager = context.getSystemService(AppInteractionManager::class.java)
+            val createParams =
+                AppInteractionSession.CreateParams.Builder()
+                    .setOnStartIntentSenderCallback(
+                        context.mainExecutor,
+                        { intentSender ->
+                            context.startIntentSender(
+                                intentSender,
+                                Intent().apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK },
+                                0,
+                                0,
+                                0,
+                                null,
+                            )
+                        },
+                    )
+                    .setTargetPackages(listOf(targetPackage))
+                    .build()
+            return suspendCancellableCoroutine { continuation ->
+                appInteractionManager.createSession(createParams, Runnable::run, continuation.asOutcomeReceiver())
+            }.also { session ->
+                if (threadId != null) {
+                    availableSession[threadId] = session
+                }
+            }
+        }
+
+        private fun hasAppInteractionManager(): Boolean {
+            return context.getSystemService("app_interaction") != null
         }
     }
 
