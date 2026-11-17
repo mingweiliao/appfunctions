@@ -235,11 +235,13 @@ class AndroidLiveAudioSessionTest {
 
     @Test
     fun `stopAudio flushes active AudioTrack and discards queued chunks`() {
-        val flushedLatch = CountDownLatch(1)
+        // play() is invoked once in start() and again on the playback thread after pause()/flush().
+        // Await the second play() (not flush()) so verification doesn't race the playback thread.
+        val playedLatch = CountDownLatch(2)
         val mockTrack =
             createInitializedMockTrack().apply {
-                every { flush() } answers {
-                    flushedLatch.countDown()
+                every { play() } answers {
+                    playedLatch.countDown()
                 }
             }
         val session =
@@ -253,7 +255,7 @@ class AndroidLiveAudioSessionTest {
         session.start()
         session.stopAudio()
 
-        assertTrue(flushedLatch.await(2, TimeUnit.SECONDS))
+        assertTrue(playedLatch.await(2, TimeUnit.SECONDS))
         verify(atLeast = 1) { mockTrack.pause() }
         verify(atLeast = 1) { mockTrack.flush() }
         verify(atLeast = 2) { mockTrack.play() }
